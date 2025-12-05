@@ -18,7 +18,7 @@ import {
     getBioavailabilityMultiplier, encryptData, decryptData, GEL_SITE_ORDER, GelSiteParams
 } from './logic.ts';
 
-const APP_VERSION = "0.1.0";
+const APP_VERSION = "Release 1.0.0";
 
 // --- Localization ---
 
@@ -2177,40 +2177,40 @@ const AppContent = () => {
                             </div>
 
                             {/* Version Footer */}
-                            <div className="pt-4 pb-2 flex justify-center">
+                            <div className="pt-4 pb-8 flex justify-center">
                                 <p className="text-xs font-medium text-gray-300">
-                                    v{APP_VERSION}
+                                    {APP_VERSION}
                                 </p>
                             </div>
                         </div>
                     )}
                 </main>
-            </div>
 
-            {/* Bottom Navigation */}
-            <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 px-6 py-4 flex justify-around items-center z-20 safe-area-pb max-w-lg mx-auto">
-                <button 
-                    onClick={() => setCurrentView('home')}
-                    className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'home' ? 'text-pink-500' : 'text-gray-400 hover:text-gray-600'}`}
-                >
-                    <Activity size={24} />
-                    <span className="text-xs font-bold">{t('nav.home')}</span>
-                </button>
-                <button 
-                    onClick={() => setCurrentView('history')}
-                    className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'history' ? 'text-pink-500' : 'text-gray-400 hover:text-gray-600'}`}
-                >
-                    <Calendar size={24} />
-                    <span className="text-xs font-bold">{t('nav.history')}</span>
-                </button>
-                <button 
-                    onClick={() => setCurrentView('settings')}
-                    className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'settings' ? 'text-pink-500' : 'text-gray-400 hover:text-gray-600'}`}
-                >
-                    <Settings size={24} />
-                    <span className="text-xs font-bold">{t('nav.settings')}</span>
-                </button>
-            </nav>
+                {/* Bottom Navigation */}
+                <nav className="bg-white border-t border-gray-100 px-6 py-4 flex justify-around items-center z-20 safe-area-pb shrink-0">
+                    <button 
+                        onClick={() => setCurrentView('home')}
+                        className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'home' ? 'text-pink-500' : 'text-gray-400 hover:text-gray-600'}`}
+                    >
+                        <Activity size={24} />
+                        <span className="text-xs font-bold">{t('nav.home')}</span>
+                    </button>
+                    <button 
+                        onClick={() => setCurrentView('history')}
+                        className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'history' ? 'text-pink-500' : 'text-gray-400 hover:text-gray-600'}`}
+                    >
+                        <Calendar size={24} />
+                        <span className="text-xs font-bold">{t('nav.history')}</span>
+                    </button>
+                    <button 
+                        onClick={() => setCurrentView('settings')}
+                        className={`flex flex-col items-center gap-1 transition-colors ${currentView === 'settings' ? 'text-pink-500' : 'text-gray-400 hover:text-gray-600'}`}
+                    >
+                        <Settings size={24} />
+                        <span className="text-xs font-bold">{t('nav.settings')}</span>
+                    </button>
+                </nav>
+            </div>
 
             <ExportModal
                 isOpen={isExportModalOpen}
