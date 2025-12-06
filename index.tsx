@@ -113,7 +113,7 @@ const TRANSLATIONS = {
         "field.patch_mode": "输入模式",
         "field.patch_rate": "释放速率 (µg/天)",
         "field.patch_total": "总剂量 (mg)",
-        "field.sl_duration": "含服时长",
+        "field.sl_duration": "含服时长 (分钟)",
         "field.sl_custom": "自定义 θ",
         "field.gel_site": "涂抹位置",
         
@@ -242,7 +242,7 @@ const TRANSLATIONS = {
         "field.patch_mode": "Input Mode",
         "field.patch_rate": "Rate (µg/day)",
         "field.patch_total": "Total Dose (mg)",
-        "field.sl_duration": "Hold Duration",
+        "field.sl_duration": "Hold Duration (minutes)",
         "field.sl_custom": "Custom θ",
         "field.gel_site": "Application Site",
 
@@ -382,7 +382,7 @@ const TRANSLATIONS = {
         "field.patch_mode": "Режим ввода",
         "field.patch_rate": "Скорость (мкг/день)",
         "field.patch_total": "Общая доза (мг)",
-        "field.sl_duration": "Длительность удержания",
+        "field.sl_duration": "Длительность удержания (min)",
         "field.sl_custom": "Пользовательский θ",
         "field.gel_site": "Место нанесения",
 
