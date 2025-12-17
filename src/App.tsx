@@ -291,10 +291,10 @@ const AppContent = () => {
                 <div className="hidden md:flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-white sticky top-0 z-20">
                     <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-xl overflow-hidden border border-gray-200 bg-white">
-                            <img src="/favicon.ico" alt="HRT Recorder logo" className="w-full h-full object-cover" />
+                            <img src="/favicon.ico" alt="HRT Tracker logo" className="w-full h-full object-cover" />
                         </div>
                         <div className="leading-tight">
-                            <p className="text-base font-black tracking-tight text-gray-900">HRT Recorder</p>
+                            <p className="text-base font-black tracking-tight text-gray-900">HRT Tracker</p>
                         </div>
                     </div>
                     <div className="flex items-center gap-2">

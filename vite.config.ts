@@ -16,8 +16,8 @@ export default defineConfig(({ mode }) => {
           registerType: 'autoUpdate',
           includeAssets: ['favicon.ico', 'icon.svg'],
           manifest: {
-            name: 'HRT Recorder',
-            short_name: 'HRT Recorder',
+            name: 'HRT Tracker',
+            short_name: 'HRT Tracker',
             description: 'Track your HRT dosage and simulate E2 levels',
             theme_color: '#ffffff',
             background_color: '#ffffff',

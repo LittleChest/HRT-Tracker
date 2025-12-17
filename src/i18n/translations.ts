@@ -3,7 +3,7 @@ export type Lang = 'zh' | 'zh-TW' | 'yue' | 'en' | 'ru' | 'uk' | 'ja';
 export const TRANSLATIONS_BASE = {
     zh: {
         "nav.home": "概览",
-        "app.title": "HRT 用药记录",
+        "app.title": "HRT Tracker",
         "nav.history": "记录",
         "nav.settings": "设置",
 
@@ -164,7 +164,7 @@ export const TRANSLATIONS_BASE = {
     },
 
     en: {
-        "app.title": "HRT Recorder",
+        "app.title": "HRT Tracker",
         "nav.home": "Overview",
         "nav.history": "History",
         "nav.settings": "Settings",
@@ -826,8 +826,14 @@ export const TRANSLATIONS = {
         "drawer.github_confirm": "要打開第三方網站 (github.com) 嗎？",
     },
 
-    en: TRANSLATIONS_BASE.en,
-    ru: TRANSLATIONS_BASE.ru,
+    en: {
+        ...TRANSLATIONS_BASE.en,
+        "app.title": "HRT Tracker",
+    },
+    ru: {
+        ...TRANSLATIONS_BASE.ru,
+        "app.title": "HRT Tracker",
+    },
 
     uk: {
         "app.title": "Журнал HRT",
@@ -993,7 +999,7 @@ export const TRANSLATIONS = {
 
     ja: {
         "nav.home": "概要",
-        "app.title": "HRT記録アプリ",
+         "app.title": "HRT Tracker",
         "nav.history": "記録",
         "nav.settings": "設定",
 

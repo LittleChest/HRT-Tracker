@@ -14,7 +14,7 @@ export const LanguageProvider = ({ children }: { children: React.ReactNode }) =>
 
     useEffect(() => {
         localStorage.setItem('hrt-lang', lang);
-        document.title = (lang.startsWith('zh') || lang === 'yue') ? "HRT 记录" : "HRT Recorder";
+        document.title = (lang.startsWith('zh') || lang === 'yue') ? "HRT 记录" : "HRT Tracker";
     }, [lang]);
 
     const t = (key: string) => {
