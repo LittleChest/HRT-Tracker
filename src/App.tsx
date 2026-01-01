@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { Settings, Plus, Activity, Calendar, Languages, Upload, Download, Trash2, Info, Github, Copy, AlertTriangle, FlaskConical } from 'lucide-react';
+import { Settings, Plus, Activity, Calendar, Languages, Upload, Download, Trash2, Info, Github, Copy, AlertTriangle, FlaskConical, Bell } from 'lucide-react';
 import { useTranslation, LanguageProvider } from './contexts/LanguageContext';
 import { useDialog, DialogProvider } from './contexts/DialogContext';
 import { APP_VERSION } from './constants';
@@ -8,6 +8,7 @@ import { DoseEvent, Route, Ester, ExtraKey, SimulationResult, runSimulation, int
 import { formatDate, formatTime, getRouteIcon } from './utils/helpers';
 import { Lang } from './i18n/translations';
 import ResultChart from './components/ResultChart';
+import { addReminderTimestamp, deleteReminderTimestamp, listReminders } from './utils/reminders';
 import WeightEditorModal from './components/WeightEditorModal';
 import DoseFormModal from './components/DoseFormModal';
 import ImportModal from './components/ImportModal';
@@ -56,6 +57,8 @@ const AppContent = () => {
     const [isDisclaimerOpen, setIsDisclaimerOpen] = useState(false);
     const [isLabModalOpen, setIsLabModalOpen] = useState(false);
     const [editingLab, setEditingLab] = useState<LabResult | null>(null);
+
+
 
     type ViewKey = 'home' | 'history' | 'lab' | 'settings';
     const viewOrder: ViewKey[] = ['home', 'history', 'lab', 'settings'];
@@ -134,6 +137,206 @@ const AppContent = () => {
         });
         return groups;
     }, [events, lang]);
+
+    // Notifications
+    type ScheduledReminder = { id: string; days: number[]; time: string; label?: string };
+    type ThresholdReminder = { id: string; threshold: number; notifyAtCross: boolean; label?: string };
+
+    const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(() => {
+        const saved = localStorage.getItem('hrt-notifications-enabled');
+        return saved ? JSON.parse(saved) : false;
+    });
+    const [notifyBeforeMins, setNotifyBeforeMins] = useState<number>(() => {
+        const saved = localStorage.getItem('hrt-notify-before-mins');
+        return saved ? Number(saved) : 15;
+    });
+
+    const [scheduledReminders, setScheduledReminders] = useState<ScheduledReminder[]>(() => {
+        const saved = localStorage.getItem('hrt-scheduled-reminders');
+        return saved ? JSON.parse(saved) : [];
+    });
+    const [thresholdReminders, setThresholdReminders] = useState<ThresholdReminder[]>(() => {
+        const saved = localStorage.getItem('hrt-threshold-reminders');
+        return saved ? JSON.parse(saved) : [];
+    });
+
+    // Push subscription state
+    const [pushEnabled, setPushEnabled] = useState<boolean>(() => {
+        const saved = localStorage.getItem('hrt-push-enabled');
+        return saved ? JSON.parse(saved) : false;
+    });
+    const [isPushSubscribed, setIsPushSubscribed] = useState<boolean>(false);
+
+    const notifTimersRef = useRef<number[]>([]);
+    const scheduledTimeoutsRef = useRef<number[]>([]);
+
+    useEffect(() => { localStorage.setItem('hrt-notifications-enabled', JSON.stringify(notificationsEnabled)); }, [notificationsEnabled]);
+    useEffect(() => { localStorage.setItem('hrt-notify-before-mins', String(notifyBeforeMins)); }, [notifyBeforeMins]);
+    useEffect(() => { localStorage.setItem('hrt-scheduled-reminders', JSON.stringify(scheduledReminders)); }, [scheduledReminders]);
+    useEffect(() => { localStorage.setItem('hrt-threshold-reminders', JSON.stringify(thresholdReminders)); }, [thresholdReminders]);
+    useEffect(() => { localStorage.setItem('hrt-push-enabled', JSON.stringify(pushEnabled)); }, [pushEnabled]);
+
+    const requestNotificationPermission = async () => {
+        if (!('Notification' in window)) return false;
+        if (Notification.permission === 'granted') return true;
+        try {
+            const perm = await Notification.requestPermission();
+            return perm === 'granted';
+        } catch {
+            return false;
+        }
+    };
+
+    const sendNotification = (title: string, body: string, tag?: string) => {
+        try {
+            if (!('Notification' in window)) return;
+            if (Notification.permission !== 'granted') return;
+            new Notification(title, { body, tag });
+        } catch (e) {
+            console.error('Notification error', e);
+        }
+    };
+
+    const clearAllTimeouts = () => {
+        notifTimersRef.current.forEach(id => clearTimeout(id));
+        notifTimersRef.current = [];
+        scheduledTimeoutsRef.current.forEach(id => clearTimeout(id));
+        scheduledTimeoutsRef.current = [];
+    };
+
+    // Helper: parse "HH:MM" to next occurrence (Date) for a given weekday
+    const nextOccurrenceForWeekdayTime = (weekday: number, timeStr: string): Date => {
+        const now = new Date();
+        const [hh, mm] = timeStr.split(':').map(s => Number(s));
+        const target = new Date(now);
+        target.setHours(hh, mm, 0, 0);
+        const diff = (weekday - target.getDay() + 7) % 7;
+        if (diff === 0 && target.getTime() <= now.getTime()) {
+            // already passed today
+            target.setDate(target.getDate() + 7);
+        } else {
+            target.setDate(target.getDate() + diff);
+        }
+        return target;
+    };
+
+    // Find first time (ms) that concentration drops below threshold using current simulation
+    const findCrossingTime = (threshold: number): number | null => {
+        if (!simulation) return null;
+        const times = simulation.timeH;
+        const conc = simulation.concPGmL;
+        for (let i = 1; i < times.length; i++) {
+            const a = conc[i - 1];
+            const b = conc[i];
+            if (a >= threshold && b < threshold) {
+                // linear interpolate between times[i-1], times[i]
+                const t1 = times[i - 1];
+                const t2 = times[i];
+                const ratio = (a - threshold) / (a - b);
+                const tCross = t1 + (t2 - t1) * ratio;
+                return Math.round(tCross * 3600000);
+            }
+        }
+        // If already below at earliest sample and still below now, return now
+        const nowMs = Date.now();
+        const hNow = nowMs / 3600000;
+        const lastConc = conc[conc.length - 1];
+        if (lastConc < threshold) return nowMs;
+        return null;
+    };
+
+    // Schedule notifications for scheduled reminders and threshold reminders
+    useEffect(() => {
+        clearAllTimeouts();
+        if (!notificationsEnabled) return;
+        if (!('Notification' in window)) return;
+        if (Notification.permission !== 'granted') {
+            requestNotificationPermission();
+        }
+
+        const now = Date.now();
+
+        // Scheduled reminders: schedule next occurrence for each selected weekday (up to one week ahead)
+        scheduledReminders.forEach(rem => {
+            rem.days.forEach(d => {
+                const next = nextOccurrenceForWeekdayTime(d, rem.time);
+                const notifyAt = next.getTime() - notifyBeforeMins * 60000;
+                const delay = notifyAt - now;
+                if (delay <= 0 && next.getTime() > now) {
+                    // occurs very soon, notify now
+                    sendNotification(rem.label || t('settings.scheduled_title'), `${rem.label || ''} ${rem.time}`.trim(), rem.id + '-' + d);
+                } else if (delay > 0 && delay < 7 * 24 * 3600 * 1000) {
+                    const id = window.setTimeout(() => {
+                        sendNotification(rem.label || t('settings.scheduled_title'), `${rem.label || ''} ${rem.time}`.trim(), rem.id + '-' + d);
+                    }, delay);
+                    scheduledTimeoutsRef.current.push(id);
+                }
+            });
+        });
+
+        // Threshold reminders: find crossing times and schedule at crossing
+        thresholdReminders.forEach(rem => {
+            if (!rem.notifyAtCross) return; // if not set to notify at cross, we just notify immediately when below
+            const crossMs = findCrossingTime(rem.threshold);
+            if (crossMs === null) return;
+            const delay = crossMs - now;
+            const title = t('settings.threshold_title');
+            const body = `${t('settings.threshold_value')}: ${rem.threshold} pg/mL`;
+            if (delay <= 0 && crossMs > now) {
+                sendNotification(title, body, rem.id);
+            } else if (delay > 0 && delay < 7 * 24 * 3600 * 1000) {
+                const id = window.setTimeout(() => {
+                    sendNotification(title, body, rem.id);
+                }, delay);
+                notifTimersRef.current.push(id);
+            }
+        });
+
+        // Also if threshold reminders are set to notify immediately when currently below threshold
+        thresholdReminders.forEach(rem => {
+            if (rem.notifyAtCross) return;
+            // check current level
+            if (currentLevel < rem.threshold) {
+                sendNotification(t('settings.threshold_title'), `${t('settings.threshold_value')}: ${rem.threshold} pg/mL`, rem.id);
+            }
+        });
+
+        return () => clearAllTimeouts();
+    }, [scheduledReminders, thresholdReminders, notificationsEnabled, notifyBeforeMins, simulation, currentLevel, t]);
+
+    // Push: Service Worker registration and subscription helpers
+    const urlBase64ToUint8Array = (base64String: string) => {
+        const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+        const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+        const rawData = window.atob(base64);
+        const outputArray = new Uint8Array(rawData.length);
+        for (let i = 0; i < rawData.length; ++i) {
+            outputArray[i] = rawData.charCodeAt(i);
+        }
+        return outputArray;
+    };
+
+    const registerServiceWorker = async () => {
+        if (!('serviceWorker' in navigator)) {
+            showDialog('alert', t('settings.push_unavailable'));
+            return false;
+        }
+        try {
+            await navigator.serviceWorker.register('/sw.js');
+            return true;
+        } catch (e) {
+            console.error('Service worker register failed', e);
+            showDialog('alert', t('settings.push_unavailable'));
+            return false;
+        }
+    };
+
+    useEffect(() => {
+        if (!pushEnabled) return;
+        registerServiceWorker().then(ok => {
+            if (!ok) setPushEnabled(false);
+        });
+    }, [pushEnabled]);
 
     type NavItem = { id: ViewKey; label: string; icon: React.ReactElement; };
 
@@ -669,6 +872,213 @@ const AppContent = () => {
                                             onChange={(val) => setLang(val as Lang)}
                                             options={languageOptions}
                                         />
+
+                                        {/* Notifications */}
+                                        <div className="flex items-start gap-3 pt-2">
+                                            <Bell className="text-rose-500" size={20} />
+                                            <div className="text-left">
+                                                <p className="font-bold text-gray-900 text-sm">{t('settings.notifications_title')}</p>
+                                                <p className="text-xs text-gray-500">{t('settings.notifications_desc')}</p>
+                                            </div>
+                                            <div className="ml-auto">
+                                                <label className="flex items-center gap-2 cursor-pointer">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={notificationsEnabled}
+                                                        onChange={async (ev) => {
+                                                            const checked = ev.currentTarget.checked;
+                                                            if (checked && ('Notification' in window) && Notification.permission !== 'granted') {
+                                                                const ok = await requestNotificationPermission();
+                                                                if (!ok) {
+                                                                    showDialog('alert', t('settings.notifications_permission_denied'));
+                                                                    setNotificationsEnabled(false);
+                                                                    return;
+                                                                }
+                                                            }
+                                                            setNotificationsEnabled(checked);
+                                                        }}
+                                                        className="w-4 h-4"
+                                                    />
+                                                    <span className="text-xs text-gray-500 ml-2">{t('settings.notifications_enable')}</span>
+                                                </label>
+                                            </div>
+                                        </div>
+
+                                        <div className="flex items-center gap-3">
+                                            <div className="ml-8 text-left">
+                                                <p className="font-bold text-gray-900 text-sm">{t('settings.notifications_before')}</p>
+                                            </div>
+                                            <div className="ml-auto">
+                                                <select
+                                                    value={notifyBeforeMins}
+                                                    onChange={(e) => setNotifyBeforeMins(Number(e.target.value))}
+                                                    className="text-sm rounded-md border bg-white px-2 py-1"
+                                                >
+                                                    <option value={0}>0</option>
+                                                    <option value={5}>5</option>
+                                                    <option value={10}>10</option>
+                                                    <option value={15}>15</option>
+                                                    <option value={30}>30</option>
+                                                    <option value={60}>60</option>
+                                                </select>
+                                            </div>
+                                        </div>
+
+                                        {/* Scheduled reminders list */}
+                                        <div className="mt-4 border-t pt-4">
+                                            <div className="flex items-center justify-between">
+                                                <div>
+                                                    <p className="font-bold text-gray-900 text-sm">{t('settings.scheduled_title')}</p>
+                                                    <p className="text-xs text-gray-500">{t('settings.scheduled_desc')}</p>
+                                                </div>
+                                                <button
+                                                    onClick={() => {
+                                                        const daysStr = prompt(t('settings.scheduled_days') + ' (0=Sun,6=Sat). e.g. 1,3,5');
+                                                        if (!daysStr) return;
+                                                        const time = prompt(t('settings.scheduled_time') + ' (HH:MM)');
+                                                        if (!time) return;
+                                                        const label = prompt('Label (optional)') || undefined;
+                                                        const days = daysStr.split(',').map(s => Number(s.trim())).filter(n => Number.isFinite(n) && n >= 0 && n <= 6);
+                                                        if (!days.length) return showDialog('alert', 'Invalid days');
+                                                        const id = uuidv4();
+                                                        setScheduledReminders(prev => [...prev, { id, days, time, label }]);
+                                                        // persist next occurrences into IndexedDB so service worker can read them
+                                                        try {
+                                                            // schedule next occurrence for each day
+                                                            days.forEach(d => {
+                                                                const next = nextOccurrenceForWeekdayTime(d, time);
+                                                                addReminderTimestamp({ id: `${id}-${d}-${next.getTime()}`, timeMs: next.getTime(), title: label || t('settings.scheduled_title'), body: `${label || ''} ${time}`.trim(), source: 'scheduled', meta: { scheduledId: id, weekday: d, time } });
+                                                            });
+                                                        } catch (e) {
+                                                            console.error('persist scheduled reminder failed', e);
+                                                        }
+                                                    }}
+                                                    className="px-3 py-2 rounded-md bg-gray-100 text-sm"
+                                                >
+                                                    {t('settings.scheduled_add')}
+                                                </button>
+                                            </div>
+
+                                            <div className="mt-3 space-y-2">
+                                                {scheduledReminders.length === 0 && (
+                                                    <div className="text-xs text-gray-400">—</div>
+                                                )}
+                                                {scheduledReminders.map(r => (
+                                                    <div key={r.id} className="flex items-center justify-between text-sm">
+                                                        <div className="text-xs text-gray-700">
+                                                            <div className="font-semibold">{r.label || `${r.time}`}</div>
+                                                            <div className="text-gray-500 text-[11px]">{`Days: ${r.days.join(', ')} • ${r.time}`}</div>
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            <button onClick={async () => { setScheduledReminders(prev => prev.filter(x => x.id !== r.id)); try { const all = await listReminders(); const toDelete = all.filter(x => x.source === 'scheduled' && x.meta && x.meta.scheduledId === r.id); await Promise.all(toDelete.map(d => deleteReminderTimestamp(d.id))); } catch (e) { console.error(e); } }} className="text-red-500 text-xs">{t('settings.scheduled_remove')}</button>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        {/* Threshold reminders list */}
+                                        <div className="mt-4 border-t pt-4">
+                                            <div className="flex items-center justify-between">
+                                                <div>
+                                                    <p className="font-bold text-gray-900 text-sm">{t('settings.threshold_title')}</p>
+                                                    <p className="text-xs text-gray-500">{t('settings.threshold_desc')}</p>
+                                                </div>
+                                                <button
+                                                    onClick={() => {
+                                                        const valStr = prompt(t('settings.threshold_value'));
+                                                        if (!valStr) return;
+                                                        const val = Number(valStr);
+                                                        if (!Number.isFinite(val)) return showDialog('alert', 'Invalid threshold');
+                                                        const notifyAtCross = confirm(t('settings.threshold_notify_at_cross'));
+                                                        const label = prompt('Label (optional)') || undefined;
+                                                        const id = uuidv4();
+                                                        setThresholdReminders(prev => [...prev, { id, threshold: val, notifyAtCross, label }]);
+                                                        try {
+                                                            if (notifyAtCross) {
+                                                                const cross = findCrossingTime(val);
+                                                                if (cross) {
+                                                                    addReminderTimestamp({ id: `${id}-cross-${cross}`, timeMs: cross, title: label || t('settings.threshold_title'), body: `${t('settings.threshold_value')}: ${val} pg/mL`, source: 'threshold', meta: { threshold: val, thresholdId: id } });
+                                                                }
+                                                            } else {
+                                                                // if currently below threshold, add immediate reminder
+                                                                if (currentLevel < val) {
+                                                                    addReminderTimestamp({ id: `${id}-now-${Date.now()}`, timeMs: Date.now(), title: label || t('settings.threshold_title'), body: `${t('settings.threshold_value')}: ${val} pg/mL`, source: 'threshold', meta: { threshold: val, thresholdId: id } });
+                                                                }
+                                                            }
+                                                        } catch (e) {
+                                                            console.error('persist threshold reminder failed', e);
+                                                        }
+                                                    }}
+                                                    className="px-3 py-2 rounded-md bg-gray-100 text-sm"
+                                                >
+                                                    {t('settings.threshold_add')}
+                                                </button>
+                                            </div>
+
+                                            <div className="mt-3 space-y-2">
+                                                {thresholdReminders.length === 0 && (
+                                                    <div className="text-xs text-gray-400">—</div>
+                                                )}
+                                                {thresholdReminders.map(r => (
+                                                    <div key={r.id} className="flex items-center justify-between text-sm">
+                                                        <div className="text-xs text-gray-700">
+                                                            <div className="font-semibold">{r.label || `${r.threshold} pg/mL`}</div>
+                                                            <div className="text-gray-500 text-[11px]">{r.notifyAtCross ? `${t('settings.threshold_notify_at_cross')}` : 'Immediate when below'}</div>
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            <button onClick={async () => { setThresholdReminders(prev => prev.filter(x => x.id !== r.id)); try { const all = await listReminders(); const toDelete = all.filter(x => x.source === 'threshold' && x.meta && x.meta.thresholdId === r.id); await Promise.all(toDelete.map(d => deleteReminderTimestamp(d.id))); } catch (e) { console.error(e); } }} className="text-red-500 text-xs">{t('settings.scheduled_remove')}</button>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        {/* Push subscription */}
+                                        <div className="mt-4 border-t pt-4 flex items-center justify-between">
+                                            <div>
+                                                <p className="font-bold text-gray-900 text-sm">{t('settings.push_enable')}</p>
+                                                <p className="text-xs text-gray-500">{t('settings.notifications_desc')}</p>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <label className="flex items-center gap-2 cursor-pointer">
+                                                    <input type="checkbox" checked={pushEnabled} onChange={async (e) => {
+                                                        const checked = e.currentTarget.checked;
+                                                        setPushEnabled(checked);
+                                                        if (checked) {
+                                                            const ok = await registerServiceWorker();
+                                                            if (!ok) {
+                                                                setPushEnabled(false);
+                                                                return;
+                                                            }
+                                                            // try register periodic sync if supported
+                                                            try {
+                                                                const reg = await navigator.serviceWorker.ready;
+                                                                if ((reg as any).periodicSync) {
+                                                                    try {
+                                                                        await (reg as any).periodicSync.register('hrt-reminder-check', { minInterval: 15 * 60 * 1000 });
+                                                                    } catch (err) {
+                                                                        // ignore register failures
+                                                                        console.warn('periodicSync register failed', err);
+                                                                    }
+                                                                }
+                                                                // ask SW to check now
+                                                                try { reg.active?.postMessage({ type: 'check-reminders' }); } catch(e) { /* ignore */ }
+                                                            } catch (err) { console.error(err); }
+                                                        } else {
+                                                            // Unsubscribe
+                                                            try {
+                                                                const reg = await navigator.serviceWorker.ready;
+                                                                const sub = await reg.pushManager.getSubscription();
+                                                                if (sub) await sub.unsubscribe();
+                                                                setIsPushSubscribed(false);
+                                                            } catch (err) { console.error(err); }
+                                                        }
+                                                    }} className="w-4 h-4" />
+                                                    <span className="text-xs text-gray-500">{pushEnabled ? t('settings.push_status_subscribed') : t('settings.push_status_unsubscribed')}</span>
+                                                </label>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
 
